@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import mammoth from 'mammoth';
 import { COURSE_NOTES, COURSE_FACULTY } from './courseData.js';
+import { PRIORITY_NOTES } from './priorityData.js';
 
 const STORAGE_KEY = "ipa_lgov_quiz_v3";
 // ── PRELOAD MANIFEST ──────────────────────────────────────────────────────
@@ -182,14 +183,16 @@ async function callClaude(apiKey, systemPrompt, userPrompt, maxTokens = 5000) {
   const text = data.content?.find(b => b.type === "text")?.text || "[]";
   return text.replace(/```json|```/g, "").trim();
 }
-async function generateQuestions(apiKey, notes, topics, count, existingQs = [], facultyStyle = "", courseOutline = "", singleTopic = null) {
+async function generateQuestions(apiKey, notes, topics, count, existingQs = [], facultyStyle = "", courseOutline = "", singleTopic = null, priorityNotes = "") {
   const topicList = topics.map(t => t.name).join(", ");
   const avoidList = existingQs.slice(0, 8).map(q => `- ${q.question}`).join("\n");
   const contextNotes = getNotesForContext(notes, singleTopic);
+  const prioritySection = priorityNotes.trim()
+    ? `PRIORITY STUDY NOTES — generate at least 70% of questions directly from this content (these are the student's own key points):\n${priorityNotes.slice(0, 150000)}\n\nSUPPLEMENTARY COURSE NOTES (use to fill any gaps):\n${contextNotes}`
+    : `COURSE NOTES:\n${contextNotes}`;
   const prompt = `Generate exactly ${count} MCQ questions for the IPA Certificate in Local Government Studies exam.
 TOPICS TO COVER (spread proportionally): ${topicList}
-COURSE NOTES:
-${contextNotes}
+${prioritySection}
 ${courseOutline ? `COURSE OUTLINE:\n${courseOutline}` : ""}
 ${facultyStyle ? `FACULTY SAMPLE QUESTIONS (match or exceed this difficulty — real exam is harder):\n${facultyStyle}` : ""}
 ${avoidList ? `DO NOT repeat:\n${avoidList}` : ""}
@@ -197,15 +200,19 @@ Return a JSON array. Each object: { "topic": "...", "question": "...", "options"
   const raw = await callClaude(apiKey, EXAMINER_SYSTEM, prompt, 5000);
   return JSON.parse(raw).map(q => ({ ...q, id: uid(), isFaculty: false }));
 }
-async function generateWeakQuestions(apiKey, notes, wrongQs, allTopics) {
+async function generateWeakQuestions(apiKey, notes, wrongQs, allTopics, priorityNotes = "") {
   const weakTopics = [...new Set(wrongQs.map(q => q.topic))];
   const topicStr = weakTopics.length ? weakTopics.join(", ") : allTopics.map(t => t.name).join(", ");
   const wrongSample = wrongQs.slice(0, 10).map(q => `Q: ${q.question}\nCorrect: ${q.options[q.correct]}`).join("\n\n");
+  const contextNotes = getNotesForContext(notes, weakTopics[0] || null);
+  const prioritySection = priorityNotes.trim()
+    ? `PRIORITY STUDY NOTES:\n${priorityNotes.slice(0, 150000)}\n\nSUPPLEMENTARY COURSE NOTES:\n${contextNotes}`
+    : `COURSE NOTES: ${contextNotes}`;
   const prompt = `Generate 15 MCQ questions on these WEAK AREAS: ${topicStr}
 Student struggled with these — generate fresh questions on the same concepts:
 ${wrongSample}
 ~50% fresh variations, ~50% new questions on weak topics.
-COURSE NOTES: ${getNotesForContext(notes, weakTopics[0] || null)}
+${prioritySection}
 Return a JSON array: { "topic":"...","question":"...","options":["A","B","C","D"],"correct":0,"explanation":"..." }`;
   const raw = await callClaude(apiKey, EXAMINER_SYSTEM, prompt, 3500);
   return JSON.parse(raw).map(q => ({ ...q, id: uid(), isFaculty: false }));
@@ -330,9 +337,10 @@ function Setup({ existing, onSave, apiKey }) {
   const [topics, setTopics] = useState(existing?.topics?.length ? existing.topics : Array.from({length:4},()=>({id:uid(),name:""})));
   const [faculty, setFaculty] = useState(existing?.faculty || "");
   const [outline, setOutline] = useState(existing?.outline || "");
+  const [priorityNotes, setPriorityNotes] = useState(existing?.priorityNotes || "");
   const validTopics = topics.filter(t => t.name.trim());
   const canSave = notes.trim().length > 100 && validTopics.length > 0;
-  const TABS = [{ id:"notes",label:"📄 Notes" },{ id:"topics",label:"📚 Topics" },{ id:"faculty",label:"🎓 Sample Qs" },{ id:"outline",label:"📋 Outline" }];
+  const TABS = [{ id:"notes",label:"📄 Notes" },{ id:"topics",label:"📚 Topics" },{ id:"priority",label:"⭐ My Notes" },{ id:"faculty",label:"🎓 Sample Qs" },{ id:"outline",label:"📋 Outline" }];
   return (
     <div style={{ maxWidth:700, margin:"0 auto", padding:"32px 16px" }} className="fadein">
       <div style={{ textAlign:"center", marginBottom:32 }}>
@@ -368,6 +376,15 @@ function Setup({ existing, onSave, apiKey }) {
           <button onClick={() => setTopics(ts=>[...ts,{id:uid(),name:""}])} style={{ width:"100%", marginTop:6, padding:"10px", border:"2px dashed #cbd5e1", background:"transparent", borderRadius:10, cursor:"pointer", color:C.slate, fontSize:14, fontWeight:600 }}>+ Add Topic</button>
         </div>
       )}
+      {tab === "priority" && (
+        <div className="fadein">
+          <p style={{ color:C.slate, fontSize:14, marginBottom:12 }}>Upload your condensed notes and NotebookLM slides here. <strong>The quiz will generate at least 70% of questions from this content</strong> — these are treated as high priority over the full lesson notes.</p>
+          <div style={{ background:"#fffbeb", border:"1px solid #fcd34d", borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:"#92400e" }}>
+            ⭐ Multiple files OK — upload your key points PDF + all NotebookLM slide decks at once
+          </div>
+          <FileUploadZone existingText={priorityNotes} onTextExtracted={setPriorityNotes} apiKey={apiKey} placeholder={"Upload your condensed notes and NotebookLM slides here...\n\nThese are prioritised over the full lesson notes when generating quiz questions."} />
+        </div>
+      )}
       {tab === "faculty" && (
         <div className="fadein">
           <p style={{ color:C.slate, fontSize:14, marginBottom:12 }}>Upload or paste faculty sample questions. Included as real exam questions <strong>and</strong> used to calibrate difficulty — the app generates at this level or harder.</p>
@@ -380,7 +397,7 @@ function Setup({ existing, onSave, apiKey }) {
           <FileUploadZone existingText={outline} onTextExtracted={setOutline} apiKey={apiKey} placeholder={"Paste your course outline / syllabus here..."} />
         </div>
       )}
-      <button onClick={() => onSave({notes, topics:validTopics, faculty, outline})} disabled={!canSave}
+      <button onClick={() => onSave({notes, topics:validTopics, faculty, outline, priorityNotes})} disabled={!canSave}
         style={{ width:"100%", marginTop:24, padding:16, border:"none", borderRadius:14, fontSize:16, fontWeight:700, cursor:canSave?"pointer":"not-allowed", background:canSave?C.navy:"#e2e8f0", color:canSave?"#fff":"#94a3b8", transition:"all .2s" }}>
         {canSave ? "Save & Go to Dashboard →" : "Add notes and at least one topic to continue"}
       </button>
@@ -742,7 +759,7 @@ function App() {
       setScreen("dashboard");
     } else {
       // First visit — use pre-extracted course data (instant, no API calls needed)
-      const setup = { notes: COURSE_NOTES, faculty: COURSE_FACULTY, topics: DEFAULT_TOPICS };
+      const setup = { notes: COURSE_NOTES, faculty: COURSE_FACULTY, topics: DEFAULT_TOPICS, priorityNotes: PRIORITY_NOTES };
       const stats = { totalAttempted:0, totalCorrect:0, topicStats:{}, wrongQuestions:[], sessionHistory:[] };
       persist({ setup, stats });
       setSetup(setup);
@@ -772,7 +789,7 @@ function App() {
     setTimed(isTimed); setMode("mock"); setScreen("loading"); setError(null);
     try {
       const aiCount = Math.max(count - FACULTY_QUESTIONS.length, 1);
-      const aiQs = await generateQuestions(apiKey, setup.notes, setup.topics, aiCount, [], setup.faculty||"", setup.outline||"");
+      const aiQs = await generateQuestions(apiKey, setup.notes, setup.topics, aiCount, [], setup.faculty||"", setup.outline||"", null, setup.priorityNotes||"");
       setQuestions([...FACULTY_QUESTIONS,...aiQs].sort(()=>Math.random()-.5).slice(0, count));
       setScreen("quiz");
     } catch(e) { setError("Could not generate questions: " + e.message); setScreen("dashboard"); }
@@ -780,14 +797,14 @@ function App() {
   const launchTopic = async (_, count = 10) => {
     setMode("topic"); setScreen("loading"); setError(null);
     try {
-      setQuestions(await generateQuestions(apiKey, setup.notes, [activeTopic], count, [], setup.faculty||"", "", activeTopic.name));
+      setQuestions(await generateQuestions(apiKey, setup.notes, [activeTopic], count, [], setup.faculty||"", "", activeTopic.name, setup.priorityNotes||""));
       setScreen("quiz");
     } catch(e) { setError("Could not generate questions: " + e.message); setScreen("dashboard"); }
   };
   const launchWeak = async () => {
     setMode("weak"); setTimed(false); setScreen("loading"); setError(null);
     try {
-      setQuestions(await generateWeakQuestions(apiKey, setup.notes, stats.wrongQuestions||[], setup.topics));
+      setQuestions(await generateWeakQuestions(apiKey, setup.notes, stats.wrongQuestions||[], setup.topics, setup.priorityNotes||""));
       setScreen("quiz");
     } catch(e) { setError("Could not generate questions: " + e.message); setScreen("dashboard"); }
   };
