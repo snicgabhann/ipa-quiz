@@ -659,81 +659,189 @@ function Quiz({ questions, timed, onFinish, onExit }) {
   );
 }
 // ── RESULTS ───────────────────────────────────────────────────────────────
-function Results({ results, onDash, onRetry }) {
+function Results({ results, onDash, onRetry, onFlag, flaggedQuestions }) {
   const [filter, setFilter] = useState("wrong");
   const [showAll, setShowAll] = useState(false);
+  // Card review states
+  const [reviewMode, setReviewMode] = useState(false);
+  const [reviewIdx, setReviewIdx] = useState(0);
+  const [reviewFilter, setReviewFilter] = useState("all");
+  const [localFlags, setLocalFlags] = useState(() => {
+    const m = {};
+    (flaggedQuestions || []).forEach(q => { m[q.question] = true; });
+    return m;
+  });
+
   const total = results.length;
-  const correct = results.filter(r=>r.correct).length;
-  const pct = Math.round((correct/total)*100);
+  const correct = results.filter(r => r.correct).length;
+  const pct = Math.round((correct / total) * 100);
   const topicStats = {};
   results.forEach(r => {
-    const t = r.question.topic||"General";
-    if(!topicStats[t]) topicStats[t]={correct:0,total:0};
+    const t = r.question.topic || "General";
+    if (!topicStats[t]) topicStats[t] = { correct: 0, total: 0 };
     topicStats[t].total++;
-    if(r.correct) topicStats[t].correct++;
+    if (r.correct) topicStats[t].correct++;
   });
-  const grade = pct>=80?{label:"Excellent! 🏆",color:C.green,bg:"#d1fae5"}
-    :pct>=65?{label:"Good work 👍",color:C.blue,bg:"#dbeafe"}
-    :pct>=50?{label:"Passing 📈",color:C.amber,bg:"#fef3c7"}
-    :{label:"Keep studying 💪",color:C.red,bg:"#fee2e2"};
-  const filtered = filter==="all"?results:filter==="wrong"?results.filter(r=>!r.correct):results.filter(r=>r.manualFlag);
-  const visible = showAll ? filtered : filtered.slice(0,6);
-  return (
-    <div style={{ maxWidth:680, margin:"0 auto", padding:"24px 16px 60px" }} className="fadein">
-      <div style={{ background:`linear-gradient(135deg,${C.navy},${C.blue})`, borderRadius:20, padding:"30px 24px", textAlign:"center", color:"#fff", marginBottom:22 }}>
-        <div style={{ fontSize:58, fontWeight:900, lineHeight:1 }}>{pct}%</div>
-        <div style={{ display:"inline-block", padding:"5px 16px", borderRadius:99, background:grade.bg, color:grade.color, fontWeight:700, fontSize:14, marginTop:10 }}>{grade.label}</div>
-        <div style={{ marginTop:10, opacity:.9 }}>{correct} of {total} correct</div>
+  const grade = pct >= 80 ? { label: "Excellent! 🏆", color: C.green, bg: "#d1fae5" }
+    : pct >= 65 ? { label: "Good work 👍", color: C.blue, bg: "#dbeafe" }
+    : pct >= 50 ? { label: "Passing 📈", color: C.amber, bg: "#fef3c7" }
+    : { label: "Keep studying 💪", color: C.red, bg: "#fee2e2" };
+
+  // Summary filter
+  const filtered = filter === "all" ? results : filter === "wrong" ? results.filter(r => !r.correct) : results.filter(r => r.manualFlag);
+  const visible = showAll ? filtered : filtered.slice(0, 6);
+
+  // Review filter
+  const reviewFiltered = reviewFilter === "all" ? results
+    : reviewFilter === "wrong" ? results.filter(r => !r.correct)
+    : results.filter(r => localFlags[r.question.question]);
+  const safeIdx = Math.min(reviewIdx, Math.max(0, reviewFiltered.length - 1));
+  const currentReview = reviewFiltered[safeIdx];
+
+  const toggleFlag = (q) => {
+    const newVal = !localFlags[q.question];
+    setLocalFlags(prev => ({ ...prev, [q.question]: newVal }));
+    onFlag && onFlag(q, newVal);
+  };
+
+  // ── Card review view ──
+  if (reviewMode && currentReview) {
+    const r = currentReview;
+    const q = r.question;
+    const isFlagged = !!localFlags[q.question];
+    return (
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: "0 0 60px" }} className="fadein">
+        {/* Top bar */}
+        <div style={{ position: "sticky", top: 0, background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", zIndex: 10 }}>
+          <button onClick={() => setReviewIdx(Math.max(0, safeIdx - 1))} disabled={safeIdx === 0} style={{ padding: "8px 14px", border: "2px solid #e2e8f0", background: "#fff", borderRadius: 10, cursor: safeIdx === 0 ? "not-allowed" : "pointer", color: safeIdx === 0 ? "#cbd5e1" : C.navy, fontWeight: 700, fontSize: 14 }}>← Back</button>
+          <span style={{ fontWeight: 700, color: C.navy, fontSize: 14 }}>{safeIdx + 1} / {reviewFiltered.length}</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button onClick={() => setReviewIdx(Math.min(reviewFiltered.length - 1, safeIdx + 1))} disabled={safeIdx === reviewFiltered.length - 1} style={{ padding: "8px 14px", border: "2px solid #e2e8f0", background: "#fff", borderRadius: 10, cursor: safeIdx === reviewFiltered.length - 1 ? "not-allowed" : "pointer", color: safeIdx === reviewFiltered.length - 1 ? "#cbd5e1" : C.navy, fontWeight: 700, fontSize: 14 }}>Next →</button>
+            <button onClick={() => setReviewMode(false)} style={{ padding: "8px 14px", border: "none", background: "#f1f5f9", borderRadius: 10, cursor: "pointer", color: "#64748b", fontWeight: 600, fontSize: 13 }}>✕ Results</button>
+          </div>
+        </div>
+        {/* Filter pills */}
+        <div style={{ padding: "12px 16px", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[["all", `All (${results.length})`], ["wrong", `Wrong (${results.filter(r => !r.correct).length})`], ["flagged", `Flagged (${Object.values(localFlags).filter(Boolean).length})`]].map(([f, label]) => (
+            <button key={f} onClick={() => { setReviewFilter(f); setReviewIdx(0); }} style={{ padding: "6px 14px", border: "2px solid", borderColor: reviewFilter === f ? C.blue : "#e2e8f0", background: reviewFilter === f ? "#eff6ff" : "#fff", borderRadius: 99, cursor: "pointer", fontSize: 13, color: reviewFilter === f ? "#1e40af" : C.slate, fontWeight: reviewFilter === f ? 700 : 500 }}>{label}</button>
+          ))}
+        </div>
+        {/* Question card */}
+        <div style={{ padding: "0 16px" }}>
+          <div style={{ background: "#fff", borderRadius: 16, border: "2px solid #e2e8f0", padding: "20px 20px 16px" }}>
+            {/* Topic + flag row */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <TopicBadge topic={q.topic} />
+              <button onClick={() => toggleFlag(q)} style={{ padding: "5px 12px", border: "2px solid", borderColor: isFlagged ? C.amber : "#e2e8f0", background: isFlagged ? "#fef3c7" : "#fff", borderRadius: 99, cursor: "pointer", fontSize: 12, fontWeight: 600, color: isFlagged ? "#92400e" : "#64748b" }}>
+                {isFlagged ? "🚩 Flagged" : "⚑ Flag"}
+              </button>
+            </div>
+            {/* Result indicator */}
+            <div style={{ marginBottom: 10, fontSize: 13, fontWeight: 700, color: r.correct ? C.green : C.red }}>
+              {r.correct ? "✅ Correct" : r.userAnswer === null ? "⏭ Not answered" : "❌ Incorrect"}
+            </div>
+            {/* Question text */}
+            <p style={{ fontSize: 15, fontWeight: 600, color: "#1e293b", lineHeight: 1.55, marginBottom: 16 }}>{q.question}</p>
+            {/* Options */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {q.options.map((opt, i) => {
+                const isCorrect = i === q.correct;
+                const isUserWrong = i === r.userAnswer && !r.correct;
+                let borderColor = "#e2e8f0", bg = "#fafafa", textColor = "#374151";
+                if (isCorrect) { borderColor = C.green; bg = "#f0fdf4"; textColor = "#166534"; }
+                if (isUserWrong) { borderColor = C.red; bg = "#fff1f2"; textColor = "#991b1b"; }
+                const prefix = isCorrect ? "✓" : isUserWrong ? "✗" : String.fromCharCode(65 + i);
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", border: `2px solid ${borderColor}`, borderRadius: 10, background: bg }}>
+                    <span style={{ width: 28, height: 28, borderRadius: "50%", background: isCorrect ? C.green : isUserWrong ? C.red : "#e2e8f0", color: (isCorrect || isUserWrong) ? "#fff" : "#64748b", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{prefix}</span>
+                    <span style={{ fontSize: 14, color: textColor, fontWeight: (isCorrect || isUserWrong) ? 600 : 400 }}>{opt}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Explanation */}
+            <div style={{ marginTop: 14, background: "#f8fafc", borderRadius: 8, padding: "10px 14px" }}>
+              <p style={{ fontSize: 13, color: C.slate, lineHeight: 1.6, margin: 0 }}><strong>Explanation:</strong> {q.explanation}</p>
+            </div>
+          </div>
+          {/* Dot navigator */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "16px 0", justifyContent: "center" }}>
+            {reviewFiltered.map((rv, i) => {
+              const isCur = i === safeIdx;
+              const isFl = !!localFlags[rv.question.question];
+              const dotColor = isFl ? C.amber : rv.correct ? C.green : C.red;
+              return <button key={i} onClick={() => setReviewIdx(i)} style={{ width: 28, height: 28, borderRadius: "50%", border: isCur ? `3px solid ${C.navy}` : "2px solid transparent", background: dotColor, cursor: "pointer", opacity: isCur ? 1 : 0.6 }} title={`Q${i + 1}`} />;
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", marginBottom: 8 }}>
+            🟢 Correct &nbsp; 🔴 Wrong &nbsp; 🟡 Flagged
+          </div>
+        </div>
       </div>
-      <div style={{ background:"#fff", borderRadius:16, padding:20, border:"2px solid #e2e8f0", marginBottom:18 }}>
-        <h3 style={{ fontSize:15, fontWeight:700, color:C.navy, marginBottom:14 }}>📊 Topic Breakdown</h3>
-        {Object.entries(topicStats).sort((a,b)=>(a[1].correct/a[1].total)-(b[1].correct/b[1].total)).map(([topic,s]) => {
-          const p=Math.round((s.correct/s.total)*100), col=p>=75?C.green:p>=50?C.amber:C.red;
-          return <div key={topic} style={{ marginBottom:11 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
-              <span style={{ fontSize:13, color:"#374151" }}>{topic}</span>
-              <span style={{ fontSize:13, fontWeight:700, color:col }}>{p}% ({s.correct}/{s.total})</span>
+    );
+  }
+
+  // ── Summary view ──
+  return (
+    <div style={{ maxWidth: 680, margin: "0 auto", padding: "24px 16px 60px" }} className="fadein">
+      <div style={{ background: `linear-gradient(135deg,${C.navy},${C.blue})`, borderRadius: 20, padding: "30px 24px", textAlign: "center", color: "#fff", marginBottom: 18 }}>
+        <div style={{ fontSize: 58, fontWeight: 900, lineHeight: 1 }}>{pct}%</div>
+        <div style={{ display: "inline-block", padding: "5px 16px", borderRadius: 99, background: grade.bg, color: grade.color, fontWeight: 700, fontSize: 14, marginTop: 10 }}>{grade.label}</div>
+        <div style={{ marginTop: 10, opacity: .9 }}>{correct} of {total} correct</div>
+      </div>
+      {/* Review answers button */}
+      <button onClick={() => { setReviewMode(true); setReviewIdx(0); setReviewFilter("all"); }} style={{ width: "100%", padding: 14, background: C.blue, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontWeight: 700, fontSize: 15, marginBottom: 18 }}>
+        📋 Review Answers Card-by-Card
+      </button>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 20, border: "2px solid #e2e8f0", marginBottom: 18 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: C.navy, marginBottom: 14 }}>📊 Topic Breakdown</h3>
+        {Object.entries(topicStats).sort((a, b) => (a[1].correct / a[1].total) - (b[1].correct / b[1].total)).map(([topic, s]) => {
+          const p = Math.round((s.correct / s.total) * 100), col = p >= 75 ? C.green : p >= 50 ? C.amber : C.red;
+          return <div key={topic} style={{ marginBottom: 11 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 13, color: "#374151" }}>{topic}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: col }}>{p}% ({s.correct}/{s.total})</span>
             </div>
             <Bar pct={p} color={col} />
           </div>;
         })}
       </div>
-      <div style={{ background:"#fff", borderRadius:16, border:"2px solid #e2e8f0", overflow:"hidden", marginBottom:20 }}>
-        <div style={{ padding:"16px 20px 12px", borderBottom:"1px solid #f1f5f9" }}>
-          <h3 style={{ fontSize:15, fontWeight:700, color:C.navy, marginBottom:12 }}>Review Questions</h3>
-          <div style={{ display:"flex", gap:8 }}>
-            {[["all",`All (${total})`],["wrong",`Wrong (${results.filter(r=>!r.correct).length})`],["flagged",`Flagged (${results.filter(r=>r.manualFlag).length})`]].map(([f,label]) => (
-              <button key={f} onClick={()=>{setFilter(f);setShowAll(false);}} style={{ padding:"6px 14px", border:"2px solid", borderColor:filter===f?C.blue:"#e2e8f0", background:filter===f?"#eff6ff":"#fff", borderRadius:99, cursor:"pointer", fontSize:13, color:filter===f?"#1e40af":C.slate, fontWeight:filter===f?700:500 }}>{label}</button>
+      <div style={{ background: "#fff", borderRadius: 16, border: "2px solid #e2e8f0", overflow: "hidden", marginBottom: 20 }}>
+        <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid #f1f5f9" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.navy, marginBottom: 12 }}>Review Questions</h3>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["all", `All (${total})`], ["wrong", `Wrong (${results.filter(r => !r.correct).length})`], ["flagged", `Flagged (${results.filter(r => r.manualFlag).length})`]].map(([f, label]) => (
+              <button key={f} onClick={() => { setFilter(f); setShowAll(false); }} style={{ padding: "6px 14px", border: "2px solid", borderColor: filter === f ? C.blue : "#e2e8f0", background: filter === f ? "#eff6ff" : "#fff", borderRadius: 99, cursor: "pointer", fontSize: 13, color: filter === f ? "#1e40af" : C.slate, fontWeight: filter === f ? 700 : 500 }}>{label}</button>
             ))}
           </div>
         </div>
-        <div style={{ padding:"10px 20px" }}>
-          {visible.map((r,i) => (
-            <div key={i} style={{ padding:"14px 0", borderBottom:i<visible.length-1?"1px solid #f8fafc":"none" }}>
-              <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
-                <span style={{ fontSize:20, flexShrink:0, marginTop:1 }}>{r.correct?"✅":"❌"}</span>
-                <div style={{ flex:1 }}>
-                  <div style={{ marginBottom:6 }}><TopicBadge topic={r.question.topic} /></div>
-                  <p style={{ fontSize:14, color:"#1e293b", fontWeight:500, lineHeight:1.5, marginBottom:8 }}>{r.question.question}</p>
-                  {!r.correct && r.userAnswer!==null && <p style={{ fontSize:13, color:C.red, marginBottom:4 }}>Your answer: {r.question.options[r.userAnswer]}</p>}
-                  {!r.correct && r.userAnswer===null && <p style={{ fontSize:13, color:"#94a3b8", marginBottom:4 }}>Not answered</p>}
-                  <p style={{ fontSize:13, color:C.green, fontWeight:600, marginBottom:6 }}>✓ Correct: {r.question.options[r.question.correct]}</p>
-                  <p style={{ fontSize:13, color:C.slate, lineHeight:1.55, background:"#f8fafc", padding:"8px 12px", borderRadius:8 }}>{r.question.explanation}</p>
+        <div style={{ padding: "10px 20px" }}>
+          {visible.map((r, i) => (
+            <div key={i} style={{ padding: "14px 0", borderBottom: i < visible.length - 1 ? "1px solid #f8fafc" : "none" }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span style={{ fontSize: 20, flexShrink: 0, marginTop: 1 }}>{r.correct ? "✅" : "❌"}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ marginBottom: 6 }}><TopicBadge topic={r.question.topic} /></div>
+                  <p style={{ fontSize: 14, color: "#1e293b", fontWeight: 500, lineHeight: 1.5, marginBottom: 8 }}>{r.question.question}</p>
+                  {!r.correct && r.userAnswer !== null && <p style={{ fontSize: 13, color: C.red, marginBottom: 4 }}>Your answer: {r.question.options[r.userAnswer]}</p>}
+                  {!r.correct && r.userAnswer === null && <p style={{ fontSize: 13, color: "#94a3b8", marginBottom: 4 }}>Not answered</p>}
+                  <p style={{ fontSize: 13, color: C.green, fontWeight: 600, marginBottom: 6 }}>✓ Correct: {r.question.options[r.question.correct]}</p>
+                  <p style={{ fontSize: 13, color: C.slate, lineHeight: 1.55, background: "#f8fafc", padding: "8px 12px", borderRadius: 8 }}>{r.question.explanation}</p>
                 </div>
               </div>
             </div>
           ))}
           {!showAll && filtered.length > 6 && (
-            <button onClick={()=>setShowAll(true)} style={{ width:"100%", padding:12, border:"none", background:"#f8fafc", borderRadius:8, cursor:"pointer", color:C.blue, fontSize:14, fontWeight:600, marginTop:8 }}>
-              Show {filtered.length-6} more →
+            <button onClick={() => setShowAll(true)} style={{ width: "100%", padding: 12, border: "none", background: "#f8fafc", borderRadius: 8, cursor: "pointer", color: C.blue, fontSize: 14, fontWeight: 600, marginTop: 8 }}>
+              Show {filtered.length - 6} more →
             </button>
           )}
-          {filtered.length===0 && <p style={{ textAlign:"center", color:"#94a3b8", padding:"20px 0" }}>Nothing to show here 🎉</p>}
+          {filtered.length === 0 && <p style={{ textAlign: "center", color: "#94a3b8", padding: "20px 0" }}>Nothing to show here 🎉</p>}
         </div>
       </div>
-      <div style={{ display:"flex", gap:12 }}>
-        <button onClick={onDash} style={{ flex:1, padding:14, border:"2px solid #e2e8f0", background:"#fff", borderRadius:12, cursor:"pointer", color:"#374151", fontWeight:600, fontSize:15 }}>← Dashboard</button>
-        <button onClick={onRetry} style={{ flex:1, padding:14, background:C.navy, color:"#fff", border:"none", borderRadius:12, cursor:"pointer", fontWeight:700, fontSize:15 }}>New Quiz →</button>
+      <div style={{ display: "flex", gap: 12 }}>
+        <button onClick={onDash} style={{ flex: 1, padding: 14, border: "2px solid #e2e8f0", background: "#fff", borderRadius: 12, cursor: "pointer", color: "#374151", fontWeight: 600, fontSize: 15 }}>← Dashboard</button>
+        <button onClick={onRetry} style={{ flex: 1, padding: 14, background: C.navy, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontWeight: 700, fontSize: 15 }}>New Quiz →</button>
       </div>
     </div>
   );
@@ -743,7 +851,7 @@ function App() {
   const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY || '';
   const [screen, setScreen] = useState("init");
   const [setup, setSetup] = useState(null);
-  const [stats, setStats] = useState({ totalAttempted:0, totalCorrect:0, topicStats:{}, wrongQuestions:[], sessionHistory:[] });
+  const [stats, setStats] = useState({ totalAttempted:0, totalCorrect:0, topicStats:{}, wrongQuestions:[], flaggedQuestions:[], sessionHistory:[] });
   const [questions, setQuestions] = useState([]);
   const [results, setResults] = useState([]);
   const [mode, setMode] = useState(null);
@@ -755,12 +863,12 @@ function App() {
     const saved = loadSaved();
     if (saved?.setup) {
       setSetup(saved.setup);
-      setStats(saved.stats || { totalAttempted:0, totalCorrect:0, topicStats:{}, wrongQuestions:[], sessionHistory:[] });
+      setStats(saved.stats || { totalAttempted:0, totalCorrect:0, topicStats:{}, wrongQuestions:[], flaggedQuestions:[], sessionHistory:[] });
       setScreen("dashboard");
     } else {
       // First visit — use pre-extracted course data (instant, no API calls needed)
       const setup = { notes: COURSE_NOTES, faculty: COURSE_FACULTY, topics: DEFAULT_TOPICS, priorityNotes: PRIORITY_NOTES };
-      const stats = { totalAttempted:0, totalCorrect:0, topicStats:{}, wrongQuestions:[], sessionHistory:[] };
+      const stats = { totalAttempted:0, totalCorrect:0, topicStats:{}, wrongQuestions:[], flaggedQuestions:[], sessionHistory:[] };
       persist({ setup, stats });
       setSetup(setup);
       setStats(stats);
@@ -817,6 +925,20 @@ function App() {
     setScreen("quiz");
   };
   const handleFinish = (res) => { setResults(res); updateStats(res); setScreen("results"); };
+  const handleFlag = useCallback((question, flagged) => {
+    setStats(prev => {
+      const flaggedQs = [...(prev.flaggedQuestions || [])];
+      if (flagged) {
+        if (!flaggedQs.find(q => q.question === question.question)) flaggedQs.push(question);
+      } else {
+        const idx = flaggedQs.findIndex(q => q.question === question.question);
+        if (idx > -1) flaggedQs.splice(idx, 1);
+      }
+      const newStats = { ...prev, flaggedQuestions: flaggedQs };
+      save(setup, newStats);
+      return newStats;
+    });
+  }, [setup, save]);
   if (screen==="init"||screen==="loading") return <Loading message={screen==="loading"?"Generating questions":"Loading"} />;
   if (screen==="preloading") return <Loading message={loadingMsg} subtitle="Loading your course materials — this only happens once" />;
   if (screen==="setup") return <Setup existing={setup} onSave={handleSaveSetup} apiKey={apiKey} />;
@@ -825,7 +947,7 @@ function App() {
   if (screen==="config_topic") return <ExamConfig mode="topic" topicName={activeTopic?.name} onStart={launchTopic} onBack={()=>setScreen("dashboard")} />;
   if (screen==="config_wrong") return <ExamConfig mode="wrong" onStart={launchWrongOnly} onBack={()=>setScreen("dashboard")} wrongCount={stats.wrongQuestions?.length||0} />;
   if (screen==="quiz") return <Quiz questions={questions} timed={timed} onFinish={handleFinish} onExit={()=>setScreen("dashboard")} />;
-  if (screen==="results") return <Results results={results} onDash={()=>setScreen("dashboard")} onRetry={()=>setScreen("dashboard")} />;
+  if (screen==="results") return <Results results={results} onDash={()=>setScreen("dashboard")} onRetry={()=>setScreen("dashboard")} onFlag={handleFlag} flaggedQuestions={stats.flaggedQuestions||[]} />;
   return null;
 }
 
