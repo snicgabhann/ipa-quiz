@@ -200,6 +200,19 @@ Return a JSON array. Each object: { "topic": "...", "question": "...", "options"
   const raw = await callClaude(apiKey, EXAMINER_SYSTEM, prompt, 5000);
   return JSON.parse(raw).map(q => ({ ...q, id: uid(), isFaculty: false }));
 }
+async function generatePriorityQuestions(apiKey, priorityNotes, topics, count) {
+  const topicList = topics.map(t => t.name).join(", ");
+  const prompt = `Generate exactly ${count} MCQ questions for the IPA Certificate in Local Government Studies exam.
+IMPORTANT: Generate 100% of questions from the PRIORITY NOTES below — these are the student's own condensed key points and the most important content to master.
+TOPICS TO COVER (spread proportionally): ${topicList}
+
+PRIORITY NOTES:
+${priorityNotes.slice(0, 150000)}
+
+Return a JSON array. Each object: { "topic": "...", "question": "...", "options": ["A","B","C","D"], "correct": 0, "explanation": "..." }`;
+  const raw = await callClaude(apiKey, EXAMINER_SYSTEM, prompt, 5000);
+  return JSON.parse(raw).map(q => ({ ...q, id: uid(), isFaculty: false }));
+}
 async function generateWeakQuestions(apiKey, notes, wrongQs, allTopics, priorityNotes = "") {
   const weakTopics = [...new Set(wrongQs.map(q => q.topic))];
   const topicStr = weakTopics.length ? weakTopics.join(", ") : allTopics.map(t => t.name).join(", ");
@@ -405,7 +418,7 @@ function Setup({ existing, onSave, apiKey }) {
   );
 }
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
-function Dashboard({ setup, stats, onMock, onTopic, onWeak, onWrongOnly, onEditSetup, error }) {
+function Dashboard({ setup, stats, onMock, onTopic, onWeak, onWrongOnly, onPriority, onEditSetup, error }) {
   const wrongCount = stats.wrongQuestions?.length || 0;
   const totalQ = stats.totalAttempted || 0;
   const totalC = stats.totalCorrect || 0;
@@ -482,6 +495,15 @@ function Dashboard({ setup, stats, onMock, onTopic, onWeak, onWrongOnly, onEditS
           </div>
           <Chip label={wrongCount>0?`${wrongCount} Qs`:"No data"} color={wrongCount>0?C.red:"#94a3b8"} bg={wrongCount>0?"#fee2e2":"#f1f5f9"} />
         </button>
+        <button onClick={onPriority} style={{ padding:"20px", border:"2px solid #d97706", background:"#fff", borderRadius:16, cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:16, transition:"all .15s" }}
+          onMouseEnter={e=>e.currentTarget.style.background="#fffbeb"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+          <span style={{ fontSize:36 }}>⭐</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontWeight:700, color:"#1e293b", fontSize:16 }}>Priority Notes Quiz</div>
+            <div style={{ color:C.slate, fontSize:13, marginTop:2 }}>100% from your key notes · topic breakdown shows exactly where to focus</div>
+          </div>
+          <Chip label="All topics" color="#92400e" bg="#fef3c7" />
+        </button>
       </div>
       {topicPerf.length > 0 && (
         <div style={{ marginTop:28 }}>
@@ -505,12 +527,13 @@ function Dashboard({ setup, stats, onMock, onTopic, onWeak, onWrongOnly, onEditS
 // ── EXAM CONFIG ───────────────────────────────────────────────────────────
 function ExamConfig({ mode, topicName, onStart, onBack, wrongCount = 0 }) {
   const [timed, setTimed] = useState(true);
-  const defaultCount = mode === "mock" ? 40 : 10;
-  const [count, setCount] = useState(defaultCount);
   const isMock = mode === "mock";
   const isWrong = mode === "wrong";
-  const icon = isMock ? "📝" : isWrong ? "❌" : "📚";
-  const title = isMock ? "Mock Exam" : isWrong ? "Wrong Answers Only" : topicName;
+  const isPriority = mode === "priority";
+  const defaultCount = isMock ? 40 : isPriority ? 15 : 10;
+  const [count, setCount] = useState(defaultCount);
+  const icon = isMock ? "📝" : isWrong ? "❌" : isPriority ? "⭐" : "📚";
+  const title = isMock ? "Mock Exam" : isWrong ? "Wrong Answers Only" : isPriority ? "Priority Notes Quiz" : topicName;
   const maxWrong = isWrong ? wrongCount : Infinity;
   const countOptions = [10, 15, 20, 40].filter(n => !isWrong || n <= maxWrong);
   return (
@@ -522,6 +545,7 @@ function ExamConfig({ mode, topicName, onStart, onBack, wrongCount = 0 }) {
         <p style={{ color:C.slate, marginTop:8, fontSize:14 }}>
           {isMock ? "Proportional across all topics · go back & change answers"
            : isWrong ? `Replay your ${wrongCount} saved wrong answers · no new AI questions`
+           : isPriority ? "100% from your priority notes · topic breakdown after to show where to focus"
            : "AI-generated from your notes · answers shown at end"}
         </p>
       </div>
@@ -916,6 +940,14 @@ function App() {
       setScreen("quiz");
     } catch(e) { setError("Could not generate questions: " + e.message); setScreen("dashboard"); }
   };
+  const launchPriority = async (_, count = 15) => {
+    setMode("priority"); setScreen("loading"); setError(null);
+    try {
+      const pNotes = setup.priorityNotes || PRIORITY_NOTES;
+      setQuestions(await generatePriorityQuestions(apiKey, pNotes, setup.topics, count));
+      setScreen("quiz");
+    } catch(e) { setError("Could not generate questions: " + e.message); setScreen("dashboard"); }
+  };
   const launchWrongOnly = (_, count = 10) => {
     const wrongQs = stats.wrongQuestions || [];
     const shuffled = [...wrongQs].sort(() => Math.random() - .5);
@@ -942,10 +974,11 @@ function App() {
   if (screen==="init"||screen==="loading") return <Loading message={screen==="loading"?"Generating questions":"Loading"} />;
   if (screen==="preloading") return <Loading message={loadingMsg} subtitle="Loading your course materials — this only happens once" />;
   if (screen==="setup") return <Setup existing={setup} onSave={handleSaveSetup} apiKey={apiKey} />;
-  if (screen==="dashboard") return <Dashboard setup={setup} stats={stats} error={error} onMock={()=>setScreen("config_mock")} onTopic={t=>{setActiveTopic(t);setScreen("config_topic");}} onWeak={launchWeak} onWrongOnly={()=>setScreen("config_wrong")} onEditSetup={()=>setScreen("setup")} />;
+  if (screen==="dashboard") return <Dashboard setup={setup} stats={stats} error={error} onMock={()=>setScreen("config_mock")} onTopic={t=>{setActiveTopic(t);setScreen("config_topic");}} onWeak={launchWeak} onWrongOnly={()=>setScreen("config_wrong")} onPriority={()=>setScreen("config_priority")} onEditSetup={()=>setScreen("setup")} />;
   if (screen==="config_mock") return <ExamConfig mode="mock" onStart={launchMock} onBack={()=>setScreen("dashboard")} />;
   if (screen==="config_topic") return <ExamConfig mode="topic" topicName={activeTopic?.name} onStart={launchTopic} onBack={()=>setScreen("dashboard")} />;
   if (screen==="config_wrong") return <ExamConfig mode="wrong" onStart={launchWrongOnly} onBack={()=>setScreen("dashboard")} wrongCount={stats.wrongQuestions?.length||0} />;
+  if (screen==="config_priority") return <ExamConfig mode="priority" onStart={launchPriority} onBack={()=>setScreen("dashboard")} />;
   if (screen==="quiz") return <Quiz questions={questions} timed={timed} onFinish={handleFinish} onExit={()=>setScreen("dashboard")} />;
   if (screen==="results") return <Results results={results} onDash={()=>setScreen("dashboard")} onRetry={()=>setScreen("dashboard")} onFlag={handleFlag} flaggedQuestions={stats.flaggedQuestions||[]} />;
   return null;
