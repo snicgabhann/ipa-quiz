@@ -418,8 +418,9 @@ function Setup({ existing, onSave, apiKey }) {
   );
 }
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
-function Dashboard({ setup, stats, onMock, onTopic, onWeak, onWrongOnly, onPriority, onEditSetup, error }) {
+function Dashboard({ setup, stats, onMock, onTopic, onWeak, onWrongOnly, onPriority, onFlagged, onEditSetup, error }) {
   const wrongCount = stats.wrongQuestions?.length || 0;
+  const flaggedCount = stats.flaggedQuestions?.length || 0;
   const totalQ = stats.totalAttempted || 0;
   const totalC = stats.totalCorrect || 0;
   const avg = totalQ > 0 ? Math.round((totalC/totalQ)*100) : null;
@@ -494,6 +495,15 @@ function Dashboard({ setup, stats, onMock, onTopic, onWeak, onWrongOnly, onPrior
             <div style={{ color:C.slate, fontSize:13, marginTop:2 }}>{wrongCount>0?`Replay exactly the ${wrongCount} questions you got wrong · no AI mixing · instant start`:"Complete a quiz first to build your wrong answers bank"}</div>
           </div>
           <Chip label={wrongCount>0?`${wrongCount} Qs`:"No data"} color={wrongCount>0?C.red:"#94a3b8"} bg={wrongCount>0?"#fee2e2":"#f1f5f9"} />
+        </button>
+        <button onClick={flaggedCount>0?onFlagged:undefined} style={{ padding:"20px", border:`2px solid ${flaggedCount>0?"#d97706":"#e2e8f0"}`, background:"#fff", borderRadius:16, cursor:flaggedCount>0?"pointer":"not-allowed", textAlign:"left", display:"flex", alignItems:"center", gap:16, opacity:flaggedCount>0?1:0.55, transition:"all .15s" }}
+          onMouseEnter={e=>{if(flaggedCount>0)e.currentTarget.style.background="#fffbeb";}} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+          <span style={{ fontSize:36 }}>🚩</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontWeight:700, color:"#1e293b", fontSize:16 }}>Flagged Quiz</div>
+            <div style={{ color:C.slate, fontSize:13, marginTop:2 }}>{flaggedCount>0?`Replay exactly the ${flaggedCount} questions you flagged · instant start`:"Flag questions during a quiz to build this bank"}</div>
+          </div>
+          <Chip label={flaggedCount>0?`${flaggedCount} Qs`:"No data"} color={flaggedCount>0?"#92400e":"#94a3b8"} bg={flaggedCount>0?"#fef3c7":"#f1f5f9"} />
         </button>
         <button onClick={onPriority} style={{ padding:"20px", border:"2px solid #d97706", background:"#fff", borderRadius:16, cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:16, transition:"all .15s" }}
           onMouseEnter={e=>e.currentTarget.style.background="#fffbeb"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
@@ -956,6 +966,14 @@ function App() {
     setTimed(false);
     setScreen("quiz");
   };
+  const launchFlaggedOnly = () => {
+    const flaggedQs = stats.flaggedQuestions || [];
+    const shuffled = [...flaggedQs].sort(() => Math.random() - .5);
+    setQuestions(shuffled);
+    setMode("flagged-only");
+    setTimed(false);
+    setScreen("quiz");
+  };
   const handleFinish = (res) => { setResults(res); updateStats(res); setScreen("results"); };
   const handleFlag = useCallback((question, flagged) => {
     setStats(prev => {
@@ -974,7 +992,7 @@ function App() {
   if (screen==="init"||screen==="loading") return <Loading message={screen==="loading"?"Generating questions":"Loading"} />;
   if (screen==="preloading") return <Loading message={loadingMsg} subtitle="Loading your course materials — this only happens once" />;
   if (screen==="setup") return <Setup existing={setup} onSave={handleSaveSetup} apiKey={apiKey} />;
-  if (screen==="dashboard") return <Dashboard setup={setup} stats={stats} error={error} onMock={()=>setScreen("config_mock")} onTopic={t=>{setActiveTopic(t);setScreen("config_topic");}} onWeak={launchWeak} onWrongOnly={()=>setScreen("config_wrong")} onPriority={()=>setScreen("config_priority")} onEditSetup={()=>setScreen("setup")} />;
+  if (screen==="dashboard") return <Dashboard setup={setup} stats={stats} error={error} onMock={()=>setScreen("config_mock")} onTopic={t=>{setActiveTopic(t);setScreen("config_topic");}} onWeak={launchWeak} onWrongOnly={()=>setScreen("config_wrong")} onPriority={()=>setScreen("config_priority")} onFlagged={launchFlaggedOnly} onEditSetup={()=>setScreen("setup")} />;
   if (screen==="config_mock") return <ExamConfig mode="mock" onStart={launchMock} onBack={()=>setScreen("dashboard")} />;
   if (screen==="config_topic") return <ExamConfig mode="topic" topicName={activeTopic?.name} onStart={launchTopic} onBack={()=>setScreen("dashboard")} />;
   if (screen==="config_wrong") return <ExamConfig mode="wrong" onStart={launchWrongOnly} onBack={()=>setScreen("dashboard")} wrongCount={stats.wrongQuestions?.length||0} />;
