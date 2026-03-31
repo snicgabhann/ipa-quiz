@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import mammoth from 'mammoth';
 import { COURSE_NOTES, COURSE_FACULTY } from './courseData.js';
-import { PRIORITY_NOTES } from './priorityData.js';
+import { PRIORITY_NOTES, PRIORITY_NOTES_BY_TOPIC } from './priorityData.js';
 
 const STORAGE_KEY = "ipa_lgov_quiz_v3";
 // ── PRELOAD MANIFEST ──────────────────────────────────────────────────────
@@ -418,9 +418,10 @@ function Setup({ existing, onSave, apiKey }) {
   );
 }
 // ── DASHBOARD ─────────────────────────────────────────────────────────────
-function Dashboard({ setup, stats, onMock, onTopic, onWeak, onWrongOnly, onPriority, onFlagged, onEditSetup, error }) {
+function Dashboard({ setup, stats, onMock, onTopic, onWeak, onWrongOnly, onPriority, onPriorityTopic, onFlagged, onEditSetup, error }) {
   const wrongCount = stats.wrongQuestions?.length || 0;
   const flaggedCount = stats.flaggedQuestions?.length || 0;
+  const priorityTopics = Object.keys(PRIORITY_NOTES_BY_TOPIC);
   const totalQ = stats.totalAttempted || 0;
   const totalC = stats.totalCorrect || 0;
   const avg = totalQ > 0 ? Math.round((totalC/totalQ)*100) : null;
@@ -505,15 +506,30 @@ function Dashboard({ setup, stats, onMock, onTopic, onWeak, onWrongOnly, onPrior
           </div>
           <Chip label={flaggedCount>0?`${flaggedCount} Qs`:"No data"} color={flaggedCount>0?"#92400e":"#94a3b8"} bg={flaggedCount>0?"#fef3c7":"#f1f5f9"} />
         </button>
-        <button onClick={onPriority} style={{ padding:"20px", border:"2px solid #d97706", background:"#fff", borderRadius:16, cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:16, transition:"all .15s" }}
-          onMouseEnter={e=>e.currentTarget.style.background="#fffbeb"} onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
-          <span style={{ fontSize:36 }}>⭐</span>
-          <div style={{ flex:1 }}>
-            <div style={{ fontWeight:700, color:"#1e293b", fontSize:16 }}>Priority Notes Quiz</div>
-            <div style={{ color:C.slate, fontSize:13, marginTop:2 }}>100% from your key notes · topic breakdown shows exactly where to focus</div>
+        <div style={{ background:"#fff", borderRadius:16, border:"2px solid #d97706" }}>
+          <button onClick={onPriority} style={{ width:"100%", padding:"20px", border:"none", background:"transparent", borderRadius:"16px 16px 0 0", cursor:"pointer", textAlign:"left", display:"flex", alignItems:"center", gap:16, transition:"all .15s" }}
+            onMouseEnter={e=>e.currentTarget.style.background="#fffbeb"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            <span style={{ fontSize:36 }}>⭐</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontWeight:700, color:"#1e293b", fontSize:16 }}>Priority Notes Quiz</div>
+              <div style={{ color:C.slate, fontSize:13, marginTop:2 }}>100% from your key notes · topic breakdown shows exactly where to focus · or pick a topic below</div>
+            </div>
+            <Chip label="All topics" color="#92400e" bg="#fef3c7" />
+          </button>
+          <div style={{ borderTop:"1px solid #fde68a", padding:"12px 16px 14px" }}>
+            <div style={{ fontSize:12, fontWeight:600, color:"#92400e", marginBottom:8 }}>📌 Quiz by topic:</div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+              {priorityTopics.map(t => (
+                <button key={t} onClick={() => onPriorityTopic(t)}
+                  style={{ padding:"6px 13px", border:"2px solid #fde68a", background:"#fffbeb", borderRadius:10, cursor:"pointer", fontSize:12, color:"#92400e", fontWeight:600, transition:"all .15s" }}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor="#d97706";e.currentTarget.style.background="#fef3c7";}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor="#fde68a";e.currentTarget.style.background="#fffbeb";}}>
+                  {t}
+                </button>
+              ))}
+            </div>
           </div>
-          <Chip label="All topics" color="#92400e" bg="#fef3c7" />
-        </button>
+        </div>
       </div>
       {topicPerf.length > 0 && (
         <div style={{ marginTop:28 }}>
@@ -543,7 +559,7 @@ function ExamConfig({ mode, topicName, onStart, onBack, wrongCount = 0 }) {
   const defaultCount = isMock ? 40 : isPriority ? 15 : 10;
   const [count, setCount] = useState(defaultCount);
   const icon = isMock ? "📝" : isWrong ? "❌" : isPriority ? "⭐" : "📚";
-  const title = isMock ? "Mock Exam" : isWrong ? "Wrong Answers Only" : isPriority ? "Priority Notes Quiz" : topicName;
+  const title = isMock ? "Mock Exam" : isWrong ? "Wrong Answers Only" : isPriority ? (topicName ? topicName : "Priority Notes Quiz") : topicName;
   const maxWrong = isWrong ? wrongCount : Infinity;
   const countOptions = [10, 15, 20, 40].filter(n => !isWrong || n <= maxWrong);
   return (
@@ -555,7 +571,7 @@ function ExamConfig({ mode, topicName, onStart, onBack, wrongCount = 0 }) {
         <p style={{ color:C.slate, marginTop:8, fontSize:14 }}>
           {isMock ? "Proportional across all topics · go back & change answers"
            : isWrong ? `Replay your ${wrongCount} saved wrong answers · no new AI questions`
-           : isPriority ? "100% from your priority notes · topic breakdown after to show where to focus"
+           : isPriority ? (topicName ? `100% from ${topicName} priority notes · AI-generated · instant start` : "100% from your priority notes · topic breakdown after to show where to focus")
            : "AI-generated from your notes · answers shown at end"}
         </p>
       </div>
@@ -890,6 +906,7 @@ function App() {
   const [results, setResults] = useState([]);
   const [mode, setMode] = useState(null);
   const [activeTopic, setActiveTopic] = useState(null);
+  const [activePriorityTopic, setActivePriorityTopic] = useState(null);
   const [timed, setTimed] = useState(false);
   const [error, setError] = useState(null);
   const [loadingMsg, setLoadingMsg] = useState("Loading…");
@@ -953,10 +970,12 @@ function App() {
   const launchPriority = async (_, count = 15) => {
     setMode("priority"); setScreen("loading"); setError(null);
     try {
-      const pNotes = setup.priorityNotes || PRIORITY_NOTES;
+      const topicNotes = activePriorityTopic ? PRIORITY_NOTES_BY_TOPIC[activePriorityTopic] : null;
+      const pNotes = topicNotes || setup.priorityNotes || PRIORITY_NOTES;
       setQuestions(await generatePriorityQuestions(apiKey, pNotes, setup.topics, count));
+      setActivePriorityTopic(null);
       setScreen("quiz");
-    } catch(e) { setError("Could not generate questions: " + e.message); setScreen("dashboard"); }
+    } catch(e) { setError("Could not generate questions: " + e.message); setActivePriorityTopic(null); setScreen("dashboard"); }
   };
   const launchWrongOnly = (_, count = 10) => {
     const wrongQs = stats.wrongQuestions || [];
@@ -992,11 +1011,11 @@ function App() {
   if (screen==="init"||screen==="loading") return <Loading message={screen==="loading"?"Generating questions":"Loading"} />;
   if (screen==="preloading") return <Loading message={loadingMsg} subtitle="Loading your course materials — this only happens once" />;
   if (screen==="setup") return <Setup existing={setup} onSave={handleSaveSetup} apiKey={apiKey} />;
-  if (screen==="dashboard") return <Dashboard setup={setup} stats={stats} error={error} onMock={()=>setScreen("config_mock")} onTopic={t=>{setActiveTopic(t);setScreen("config_topic");}} onWeak={launchWeak} onWrongOnly={()=>setScreen("config_wrong")} onPriority={()=>setScreen("config_priority")} onFlagged={launchFlaggedOnly} onEditSetup={()=>setScreen("setup")} />;
+  if (screen==="dashboard") return <Dashboard setup={setup} stats={stats} error={error} onMock={()=>setScreen("config_mock")} onTopic={t=>{setActiveTopic(t);setScreen("config_topic");}} onWeak={launchWeak} onWrongOnly={()=>setScreen("config_wrong")} onPriority={()=>{setActivePriorityTopic(null);setScreen("config_priority");}} onPriorityTopic={t=>{setActivePriorityTopic(t);setScreen("config_priority");}} onFlagged={launchFlaggedOnly} onEditSetup={()=>setScreen("setup")} />;
   if (screen==="config_mock") return <ExamConfig mode="mock" onStart={launchMock} onBack={()=>setScreen("dashboard")} />;
   if (screen==="config_topic") return <ExamConfig mode="topic" topicName={activeTopic?.name} onStart={launchTopic} onBack={()=>setScreen("dashboard")} />;
   if (screen==="config_wrong") return <ExamConfig mode="wrong" onStart={launchWrongOnly} onBack={()=>setScreen("dashboard")} wrongCount={stats.wrongQuestions?.length||0} />;
-  if (screen==="config_priority") return <ExamConfig mode="priority" onStart={launchPriority} onBack={()=>setScreen("dashboard")} />;
+  if (screen==="config_priority") return <ExamConfig mode="priority" topicName={activePriorityTopic} onStart={launchPriority} onBack={()=>{setActivePriorityTopic(null);setScreen("dashboard");}} />;
   if (screen==="quiz") return <Quiz questions={questions} timed={timed} onFinish={handleFinish} onExit={()=>setScreen("dashboard")} />;
   if (screen==="results") return <Results results={results} onDash={()=>setScreen("dashboard")} onRetry={()=>setScreen("dashboard")} onFlag={handleFlag} flaggedQuestions={stats.flaggedQuestions||[]} />;
   return null;
